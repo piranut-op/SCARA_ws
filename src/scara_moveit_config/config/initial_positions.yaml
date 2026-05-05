@@ -1,0 +1,6 @@
+# Default initial positions for scara_robot's ros2_control fake system
+
+initial_positions:
+  Link_1_joint: 0
+  Link_2_joint: 0
+  ee_joint: 0

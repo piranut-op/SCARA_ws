@@ -1,0 +1,1 @@
+controller_joint_names: ['ee_joint', 'Link_1_joint', 'Link_2_joint', 'ee_joint', ]

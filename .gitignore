@@ -1,0 +1,19 @@
+# colcon build artifacts
+build/
+install/
+log/
+
+# stale archive
+src/scara_robot.zip
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
