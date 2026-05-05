@@ -13,6 +13,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(moveit_ros_planning_interface REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 
 install(
@@ -42,9 +43,20 @@ ament_target_dependencies(pick_and_place
   visualization_msgs
 )
 
+add_executable(cam_pick_and_place src/cam_pick_and_place.cpp)
+ament_target_dependencies(cam_pick_and_place
+  rclcpp
+  std_msgs
+  geometry_msgs
+  moveit_ros_planning_interface
+  moveit_msgs
+  visualization_msgs
+)
+
 install(TARGETS
   move
   pick_and_place
+  cam_pick_and_place
   DESTINATION lib/${PROJECT_NAME}
 )
 
