@@ -14,6 +14,8 @@ find_package(moveit_ros_planning_interface REQUIRED)
 find_package(moveit_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 
 
 install(
@@ -51,6 +53,8 @@ ament_target_dependencies(cam_pick_and_place
   moveit_ros_planning_interface
   moveit_msgs
   visualization_msgs
+  tf2_ros
+  tf2_geometry_msgs
 )
 
 install(TARGETS

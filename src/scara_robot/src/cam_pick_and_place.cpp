@@ -1,10 +1,14 @@
 // Camera-driven SCARA pick-and-place using MoveIt.
 //
-// Mirrors src/pick_and_place.cpp but takes the pick (x, y) from the
-// /bottle_cap/workspace_position topic published by the YOLO bottle-cap
-// detector in SCARA_pkg/detect_bottle_cap.py, and uses MoveIt's KDL solver
-// (via setPoseTarget on the "arm" group, tip = Link_ee) instead of the
-// custom analytical IK in SCARA_pkg/ikpos.py.
+// Subscribes to /bottle_cap/detections (geometry_msgs/PointStamped in the
+// camera optical frame, expressed in metres) published by
+// SCARA_pkg/detect_bottle_cap.py — the detector deprojects the locked
+// pixel using real RealSense intrinsics + measured depth.
+//
+// We then transform that point into base_link via tf2 (the launch file
+// publishes a static TF from base_link → camera_color_optical_frame), and
+// use MoveIt's KDL solver via setPoseTarget on the "arm" group (tip =
+// Link_ee).
 //
 // The arm group spans base_link -> Link_ee, so the same pose target drives
 // both the planar joints (Link_1_joint, Link_2_joint) AND the prismatic
@@ -12,9 +16,7 @@
 // = raise it.
 
 #include <atomic>
-#include <cctype>
 #include <chrono>
-#include <cmath>
 #include <condition_variable>
 #include <map>
 #include <memory>
@@ -23,129 +25,30 @@
 #include <sstream>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
-#include <std_msgs/msg/string.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <moveit/move_group_interface/move_group_interface.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 using moveit::planning_interface::MoveGroupInterface;
 using JointMap = std::map<std::string, double>;
-
-namespace {
-
-// ── Minimal JSON helpers (the detector publishes std_msgs/String JSON). ──
-// We don't pull in a full JSON dep; we only need a few numeric fields per
-// detection. This is fragile by design — keep it in lock-step with the
-// localizer's output schema.
-struct Detection {
-  std::string cls;
-  double confidence{0.0};
-  double robot_x_cm{0.0};
-  double robot_y_cm{0.0};
-};
-
-bool find_number(const std::string & s, const std::string & key, double & out) {
-  auto k = s.find("\"" + key + "\":");
-  if (k == std::string::npos) return false;
-  k += key.size() + 3;
-  while (k < s.size() && (s[k] == ' ' || s[k] == ':')) ++k;
-  std::size_t end = k;
-  while (end < s.size() && (std::isdigit(s[end]) || s[end] == '.' ||
-                            s[end] == '-' || s[end] == '+' || s[end] == 'e'))
-    ++end;
-  if (end == k) return false;
-  try { out = std::stod(s.substr(k, end - k)); }
-  catch (...) { return false; }
-  return true;
-}
-
-bool find_class(const std::string & s, std::string & out) {
-  auto k = s.find("\"class\":");
-  if (k == std::string::npos) return false;
-  k = s.find('"', k + 8);
-  if (k == std::string::npos) return false;
-  auto e = s.find('"', k + 1);
-  if (e == std::string::npos) return false;
-  out = s.substr(k + 1, e - k - 1);
-  return true;
-}
-
-// Crude split on top-level "},{" — assumes no nested braces in detection
-// objects beyond what the localizer emits today (intrinsics is a flat dict
-// nested inside, so we instead split on `}, {` only at depth 0).
-std::vector<std::string> split_detections(const std::string & json_array) {
-  std::vector<std::string> out;
-  int depth = 0;
-  std::size_t start = std::string::npos;
-  for (std::size_t i = 0; i < json_array.size(); ++i) {
-    char c = json_array[i];
-    if (c == '{') {
-      if (depth == 0) start = i;
-      ++depth;
-    } else if (c == '}') {
-      --depth;
-      if (depth == 0 && start != std::string::npos) {
-        out.emplace_back(json_array.substr(start, i - start + 1));
-        start = std::string::npos;
-      }
-    }
-  }
-  return out;
-}
-
-std::vector<Detection> parse_localized_json(const std::string & s) {
-  std::vector<Detection> out;
-  for (const auto & blob : split_detections(s)) {
-    Detection d;
-    if (!find_class(blob, d.cls)) continue;
-    find_number(blob, "confidence", d.confidence);
-    // robot.x_cm / robot.y_cm appear inside a nested {"robot": {...}} dict.
-    // Our key search matches the inner keys directly because we don't
-    // descend into nested dicts — but x_cm / y_cm appear *only* under
-    // "robot" in the localizer schema, so this is safe.
-    find_number(blob, "x_cm", d.robot_x_cm);
-    find_number(blob, "y_cm", d.robot_y_cm);
-    out.push_back(d);
-  }
-  return out;
-}
-
-}  // namespace
 
 
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  auto const node = std::make_shared<rclcpp::Node>(
-    "scara_cam_pick_and_place",
-    rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
+  auto const node = std::make_shared<rclcpp::Node>("scara_cam_pick_and_place");
 
   // ── Parameters ─────────────────────────────────────────────────────────
   auto declare_d = [&](const std::string & n, double dflt) {
     node->declare_parameter<double>(n, dflt);
     return node->get_parameter(n).as_double();
   };
-  auto declare_i = [&](const std::string & n, int64_t dflt) {
-    node->declare_parameter<int>(n, static_cast<int>(dflt));
-    return node->get_parameter(n).as_int();
-  };
-  auto declare_s = [&](const std::string & n, const std::string & dflt) {
-    node->declare_parameter<std::string>(n, dflt);
-    return node->get_parameter(n).as_string();
-  };
-
-  std::string class_filter      = declare_s("class_filter",      "bottle_cap");
-  double      min_confidence    = declare_d("min_confidence",    0.50);
-
-  // workspace-centre offset in SCARA base frame (metres)
-  double base_off_x             = declare_d("base_to_workspace_x_m", 0.0);
-  double base_off_y             = declare_d("base_to_workspace_y_m", 0.20);
-
-  int    stable_frames          = declare_i("stable_frames",     8);
-  double stable_deadband_m      = declare_d("stable_deadband_m", 0.01);
 
   // Cartesian z of Link_ee in base_link frame (metres). Tune to your URDF.
   double z_travel_m             = declare_d("z_travel_m",        0.10);
@@ -177,67 +80,44 @@ int main(int argc, char * argv[])
   auto marker_pub = node->create_publisher<visualization_msgs::msg::MarkerArray>(
     "/scara_cam_pick_place_markers", rclcpp::QoS(1).transient_local());
 
-  // ── Stability tracker (only consumed in IDLE) ──────────────────────────
+  // ── tf2 buffer + listener for camera_optical_frame → base_link ────────
+  auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  tf2_ros::TransformListener tf_listener(*tf_buffer);
+
+  // ── Target intake ──────────────────────────────────────────────────────
+  // The detector publishes a 3-D point in the camera optical frame
+  // (deprojected from pixel + measured depth). We just tf2-transform to
+  // base_link and hand the (x, y) to the planner; z is overridden by the
+  // travel/pick heights.
   enum class Phase { IDLE, BUSY };
   std::atomic<Phase> phase{Phase::IDLE};
 
-  std::mutex stable_mu;
-  std::optional<std::pair<double, double>> stable_xy;
-  int stable_count = 0;
-
-  std::optional<std::pair<double, double>> ready_target;  // set when stable
+  std::optional<std::pair<double, double>> ready_target;
   std::mutex ready_mu;
   std::condition_variable ready_cv;
 
-  auto sub = node->create_subscription<std_msgs::msg::String>(
-    "/bottle_cap/workspace_position", 10,
-    [&](const std_msgs::msg::String::SharedPtr msg) {
+  auto sub = node->create_subscription<geometry_msgs::msg::PointStamped>(
+    "/bottle_cap/detections", 10,
+    [&](const geometry_msgs::msg::PointStamped::SharedPtr msg) {
       if (phase.load() != Phase::IDLE) return;
-      auto dets = parse_localized_json(msg->data);
-
-      // Best by confidence, with class/conf filter.
-      const Detection * best = nullptr;
-      for (auto & d : dets) {
-        if (!class_filter.empty() && d.cls != class_filter) continue;
-        if (d.confidence < min_confidence) continue;
-        if (!best || d.confidence > best->confidence) best = &d;
-      }
-      std::lock_guard<std::mutex> lock(stable_mu);
-      if (!best) {
-        stable_xy.reset();
-        stable_count = 0;
+      geometry_msgs::msg::PointStamped in_base;
+      try {
+        in_base = tf_buffer->transform(*msg, "base_link",
+                                        tf2::durationFromSec(0.5));
+      } catch (const tf2::TransformException & ex) {
+        RCLCPP_WARN(logger, "TF transform failed: %s", ex.what());
         return;
       }
-
-      double x = best->robot_x_cm / 100.0 + base_off_x;
-      double y = best->robot_y_cm / 100.0 + base_off_y;
-
-      if (!stable_xy.has_value()) {
-        stable_xy = std::make_pair(x, y);
-        stable_count = 1;
-        return;
+      RCLCPP_INFO(logger,
+        "%s=(%.3f, %.3f, %.3f) → base_link=(%.3f, %.3f, %.3f) m",
+        msg->header.frame_id.c_str(),
+        msg->point.x, msg->point.y, msg->point.z,
+        in_base.point.x, in_base.point.y, in_base.point.z);
+      {
+        std::lock_guard<std::mutex> rl(ready_mu);
+        ready_target = std::make_pair(in_base.point.x, in_base.point.y);
       }
-      double dx = x - stable_xy->first;
-      double dy = y - stable_xy->second;
-      if (std::sqrt(dx * dx + dy * dy) <= stable_deadband_m) {
-        stable_count += 1;
-        stable_xy = std::make_pair(
-          0.5 * (stable_xy->first  + x),
-          0.5 * (stable_xy->second + y));
-      } else {
-        stable_xy = std::make_pair(x, y);
-        stable_count = 1;
-      }
-
-      if (stable_count >= stable_frames) {
-        {
-          std::lock_guard<std::mutex> rl(ready_mu);
-          ready_target = stable_xy;
-        }
-        stable_xy.reset();
-        stable_count = 0;
-        ready_cv.notify_one();
-      }
+      ready_cv.notify_one();
     });
 
   // ── Helpers ────────────────────────────────────────────────────────────
@@ -307,10 +187,8 @@ int main(int argc, char * argv[])
   };
 
   RCLCPP_INFO(logger,
-    "scara_cam_pick_and_place ready  |  class='%s'  "
-    "offset=(%.3f, %.3f) m  z_travel=%.3f  z_pick=%.3f  "
-    "place=(%.3f, %.3f)",
-    class_filter.c_str(), base_off_x, base_off_y,
+    "scara_cam_pick_and_place ready  |  z_travel=%.3f  z_pick=%.3f  "
+    "place=(%.3f, %.3f)  |  expecting TF base_link → camera_color_optical_frame",
     z_travel_m, z_pick_m, place_x_m, place_y_m);
 
   // ── Main loop ──────────────────────────────────────────────────────────
