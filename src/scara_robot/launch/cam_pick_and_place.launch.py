@@ -64,6 +64,10 @@ def generate_launch_description():
     place_y_m        = LaunchConfiguration("place_y_m")
     cooldown_s       = LaunchConfiguration("cooldown_s")
     dwell_engage_s   = LaunchConfiguration("dwell_engage_s")
+    workspace_z_m    = LaunchConfiguration("workspace_z_m")
+    joint1_offset_turns = LaunchConfiguration("joint1_offset_turns")
+    joint2_offset_turns = LaunchConfiguration("joint2_offset_turns")
+    zero_on_start    = LaunchConfiguration("zero_on_start")
 
     return LaunchDescription([
         DeclareLaunchArgument("use_hardware",  default_value="false",
@@ -71,38 +75,60 @@ def generate_launch_description():
         DeclareLaunchArgument("show_preview",  default_value="true"),
 
         # Camera mount pose (base_link → camera_color_optical_frame).
-        DeclareLaunchArgument("cam_x",         default_value="0.0"),
-        DeclareLaunchArgument("cam_y",         default_value="0.20"),
-        DeclareLaunchArgument("cam_z",         default_value="0.50"),
+        DeclareLaunchArgument("cam_x",         default_value="0.20"),
+        DeclareLaunchArgument("cam_y",         default_value="0.0"),
+        DeclareLaunchArgument("cam_z",         default_value="0.69"),
         # Straight-down: optical +Z points downward into the workspace.
         DeclareLaunchArgument("cam_roll",      default_value=str(math.pi)),
         DeclareLaunchArgument("cam_pitch",     default_value="0.0"),
         DeclareLaunchArgument("cam_yaw",       default_value="0.0"),
 
-        DeclareLaunchArgument("z_travel_m",    default_value="0.10"),
-        DeclareLaunchArgument("z_pick_m",      default_value="0.04"),
+        DeclareLaunchArgument("z_travel_m",    default_value="0.18"),
+        DeclareLaunchArgument("z_pick_m",      default_value="0.10"),
         DeclareLaunchArgument("place_x_m",     default_value="0.10"),
         DeclareLaunchArgument("place_y_m",     default_value="0.25"),
         DeclareLaunchArgument("cooldown_s",    default_value="2.0"),
         DeclareLaunchArgument("dwell_engage_s", default_value="1.0"),
+        # Workspace surface height in base_link (m). Caps sit on this plane;
+        # the ray-plane intersection projects pixels onto it.
+        DeclareLaunchArgument("workspace_z_m", default_value="0.0"),
+        DeclareLaunchArgument("joint1_offset_turns", default_value="-0.5",
+            description="Link_1 motor turns offset for hardware calibration."),
+        DeclareLaunchArgument("joint2_offset_turns", default_value="0.0",
+            description="Link_2 motor turns offset for hardware calibration."),
+        DeclareLaunchArgument("zero_on_start", default_value="true",
+            description="Send MKS 0x92 set-zero so the third motor adopts "
+                        "its current shaft position as count=0 at startup. "
+                        "Set true if you back-drive by hand before power-up."),
 
         IncludeLaunchDescription(PythonLaunchDescriptionSource(moveit_demo)),
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(hw_bridge),
             condition=IfCondition(use_hardware),
+            launch_arguments={
+                "joint1_offset_turns": joint1_offset_turns,
+                "joint2_offset_turns": joint2_offset_turns,
+                "zero_on_start":       zero_on_start,
+            }.items(),
         ),
 
         # Static TF: base_link → camera_color_optical_frame.
-        # Args: x y z roll pitch yaw parent child
+        # Use named flags — positional ordering is yaw-pitch-roll, easy to
+        # get backwards.
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
             name="base_to_camera_optical",
             arguments=[
-                cam_x, cam_y, cam_z,
-                cam_roll, cam_pitch, cam_yaw,
-                "base_link", "camera_color_optical_frame",
+                "--x",     cam_x,
+                "--y",     cam_y,
+                "--z",     cam_z,
+                "--roll",  cam_roll,
+                "--pitch", cam_pitch,
+                "--yaw",   cam_yaw,
+                "--frame-id",       "base_link",
+                "--child-frame-id", "camera_color_optical_frame",
             ],
         ),
 
@@ -125,6 +151,7 @@ def generate_launch_description():
                 "place_y_m":      place_y_m,
                 "cooldown_s":     cooldown_s,
                 "dwell_engage_s": dwell_engage_s,
+                "workspace_z_m":  workspace_z_m,
             }],
         ),
     ])

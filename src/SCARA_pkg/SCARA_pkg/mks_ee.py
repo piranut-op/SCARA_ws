@@ -37,7 +37,7 @@ import time
 import can
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool, Float32, Int32
 
 
 COUNTS_PER_REV = 16384       # MKS 14-bit encoder, 0x4000 per revolution
@@ -119,6 +119,10 @@ class MKSEndEffectorNode(Node):
 
         self._tx_lock = threading.Lock()
         self._last_meters = None
+        # Cumulative encoder-count target for relative moves (independent of
+        # the meters/F5 absolute path, which the cam pick-and-place doesn't
+        # use). Starts at 0 assuming the motor was last zeroed at this pose.
+        self._rel_counts_target = 0
         self._tx_err_count = 0
         self._last_err_log = 0.0
 
@@ -128,6 +132,12 @@ class MKSEndEffectorNode(Node):
         self.create_subscription(Bool, '/mks/ee_set_zero',
                                  lambda m: self.send_set_zero() if m.data else None,
                                  10)
+        # Relative motion in raw encoder counts (CCW = negative, CW = positive
+        # per MKS §5.1.2). Each publish advances the cumulative absolute target
+        # by `data` counts and re-emits an F5 frame. Used by cam_pick_and_place
+        # for the screw / unscrew motion at engage poses.
+        self.create_subscription(Int32, '/mks/ee_relative_counts',
+                                 self.on_ee_relative_counts, 10)
 
         # ── Optional startup ──────────────────────────────────────────────
         if bool(gp('set_bus_foc_on_start')):
@@ -192,6 +202,20 @@ class MKSEndEffectorNode(Node):
             f"abs ee={clamped:+.4f}m → counts={counts:+d} "
             f"(speed={self.speed} rpm, acc={self.accel})")
 
+    def send_abs_counts(self, counts: int):
+        """Send an F5 absolute-position frame using raw encoder counts."""
+        if not (INT24_MIN <= counts <= INT24_MAX):
+            self.get_logger().error(
+                f"Computed counts {counts} out of int24 range; aborting.")
+            return
+        speed_be = struct.pack('>H', max(0, min(3000, self.speed)))
+        payload = bytes([0xF5]) + speed_be + bytes([self.accel]) \
+            + encode_int24_be(counts)
+        self._send_frame(
+            payload,
+            f"abs counts={counts:+d} "
+            f"(speed={self.speed} rpm, acc={self.accel})")
+
     # ── Subscribers ───────────────────────────────────────────────────────
     def on_ee_cmd(self, msg: Float32):
         target = float(msg.data)
@@ -200,6 +224,17 @@ class MKSEndEffectorNode(Node):
             return
         self._last_meters = target
         self.send_abs_target(target)
+
+    def on_ee_relative_counts(self, msg: Int32):
+        delta = int(msg.data)
+        if delta == 0:
+            return
+        self._rel_counts_target += delta
+        self.get_logger().info(
+            f"relative move: Δ={delta:+d} counts "
+            f"({delta / COUNTS_PER_REV:+.2f} rev) → "
+            f"target={self._rel_counts_target:+d} counts")
+        self.send_abs_counts(self._rel_counts_target)
 
     # ── Cleanup ───────────────────────────────────────────────────────────
     def destroy_node(self):

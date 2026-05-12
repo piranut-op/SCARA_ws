@@ -19,6 +19,8 @@ EE heights, place / home positions, and timings are all launch arguments
 (see the parameter declarations below). Tune them dry-run before going live.
 """
 
+import math
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
@@ -30,6 +32,14 @@ def generate_launch_description():
     show_preview        = LaunchConfiguration("show_preview")
     can_iface           = LaunchConfiguration("can_interface")
     with_hardware       = LaunchConfiguration("with_hardware")
+
+    cam_x               = LaunchConfiguration("cam_x")
+    cam_y               = LaunchConfiguration("cam_y")
+    cam_z               = LaunchConfiguration("cam_z")
+    cam_roll            = LaunchConfiguration("cam_roll")
+    cam_pitch           = LaunchConfiguration("cam_pitch")
+    cam_yaw             = LaunchConfiguration("cam_yaw")
+    workspace_z_m       = LaunchConfiguration("workspace_z_m")
 
     class_filter        = LaunchConfiguration("class_filter")
     min_confidence      = LaunchConfiguration("min_confidence")
@@ -66,8 +76,22 @@ def generate_launch_description():
         DeclareLaunchArgument("class_filter",          default_value="bottle_cap"),
         DeclareLaunchArgument("min_confidence",        default_value="0.50"),
 
+        # Camera mount pose (base_link → camera_color_optical_frame).
+        # Straight-down: roll=π, pitch=0, yaw=0.
+        DeclareLaunchArgument("cam_x",         default_value="0.20"),
+        DeclareLaunchArgument("cam_y",         default_value="0.0"),
+        DeclareLaunchArgument("cam_z",         default_value="0.69"),
+        DeclareLaunchArgument("cam_roll",      default_value=str(math.pi)),
+        DeclareLaunchArgument("cam_pitch",     default_value="0.0"),
+        DeclareLaunchArgument("cam_yaw",       default_value="0.0"),
+
+        # Workspace plane height in base_link (metres).
+        DeclareLaunchArgument("workspace_z_m", default_value="0.0"),
+
+        # Optional shift if downstream IK uses a non-base_link frame
+        # (e.g. shoulder-relative). Set both to 0 for direct base_link input.
         DeclareLaunchArgument("base_to_workspace_x_m", default_value="0.0"),
-        DeclareLaunchArgument("base_to_workspace_y_m", default_value="0.20"),
+        DeclareLaunchArgument("base_to_workspace_y_m", default_value="0.0"),
 
         DeclareLaunchArgument("stable_frames",         default_value="8"),
         DeclareLaunchArgument("stable_deadband_m",     default_value="0.01"),
@@ -89,6 +113,23 @@ def generate_launch_description():
         DeclareLaunchArgument("dwell_place_s",         default_value="0.8"),
         DeclareLaunchArgument("home_s",                default_value="2.0"),
         DeclareLaunchArgument("cooldown_s",            default_value="2.0"),
+
+        # Static TF: base_link → camera_color_optical_frame.
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            name="base_to_camera_optical",
+            arguments=[
+                "--x",     cam_x,
+                "--y",     cam_y,
+                "--z",     cam_z,
+                "--roll",  cam_roll,
+                "--pitch", cam_pitch,
+                "--yaw",   cam_yaw,
+                "--frame-id",       "base_link",
+                "--child-frame-id", "camera_color_optical_frame",
+            ],
+        ),
 
         Node(
             package="SCARA_pkg",
@@ -127,6 +168,7 @@ def generate_launch_description():
             parameters=[{
                 "class_filter":          class_filter,
                 "min_confidence":        min_confidence,
+                "workspace_z_m":         workspace_z_m,
                 "base_to_workspace_x_m": base_off_x,
                 "base_to_workspace_y_m": base_off_y,
                 "stable_frames":         stable_frames,

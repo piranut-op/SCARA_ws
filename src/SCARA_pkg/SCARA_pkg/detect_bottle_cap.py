@@ -212,16 +212,17 @@ class BottleCapDetectorNode(Node):
         if elapsed < STABILITY_DURATION_S:
             return
 
-        # Stable — sample real depth at the locked pixel and deproject to a
-        # 3-D point in the camera optical frame.
-        depth_m = depth_frame.get_distance(int(cx), int(cy))
-        if depth_m <= 0.0:
-            # Invalid depth (hole, glare, out of range). Skip this frame; the
-            # next valid one will publish.
-            return
-
-        X, Y, Z = rs.rs2_deproject_pixel_to_point(
-            self._intr, [float(cx), float(cy)], float(depth_m))
+        # Stable — emit the locked pixel as a ray in the camera optical
+        # frame. We publish the point at unit Z along the ray:
+        #   X = (px - ppx) / fx,  Y = -(py - ppy) / fy,  Z = 1.0
+        # Y is negated to match the camera's physical mount orientation
+        # (image-down maps to +base_link Y instead of -Y). The downstream
+        # C++ node intersects this ray with the known workspace plane in
+        # base_link, so we don't depend on depth at all (unreliable on
+        # matte black surfaces with the D435i IR).
+        X = (float(cx) - self._intr.ppx) / self._intr.fx
+        Y = -(float(cy) - self._intr.ppy) / self._intr.fy
+        Z = 1.0
 
         msg = PointStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -233,8 +234,8 @@ class BottleCapDetectorNode(Node):
 
         if not self._stable_published:
             self.get_logger().info(
-                f"Stable cap at px=({cx},{cy})  depth={depth_m:.3f}m  "
-                f"→ {CAMERA_OPTICAL_FRAME}=({X:.3f}, {Y:.3f}, {Z:.3f}) m"
+                f"Stable cap at px=({cx},{cy}) → ray in "
+                f"{CAMERA_OPTICAL_FRAME}=({X:.4f}, {Y:.4f}, 1.0) (unit-Z)"
             )
             self._stable_published = True
 

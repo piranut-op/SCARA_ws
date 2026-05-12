@@ -28,6 +28,8 @@ def generate_launch_description():
     can_iface = LaunchConfiguration('can_interface')
     set_zero  = LaunchConfiguration('zero_on_start')
     set_foc   = LaunchConfiguration('set_bus_foc_on_start')
+    j1_off    = LaunchConfiguration('joint1_offset_turns')
+    j2_off    = LaunchConfiguration('joint2_offset_turns')
 
     return LaunchDescription([
         DeclareLaunchArgument('can_interface', default_value='can0'),
@@ -35,6 +37,10 @@ def generate_launch_description():
                               description='Send MKS 0x92 set-zero at start.'),
         DeclareLaunchArgument('set_bus_foc_on_start', default_value='false',
                               description='Send MKS 0x82 mode=5 (Bus FOC) at start.'),
+        DeclareLaunchArgument('joint1_offset_turns', default_value='0.0',
+                              description='ODrive motor turns at Link_1 angle=0 (calibration).'),
+        DeclareLaunchArgument('joint2_offset_turns', default_value='0.0',
+                              description='ODrive motor turns at Link_2 angle=0 (calibration).'),
 
         Node(
             package='SCARA_pkg',
@@ -47,7 +53,11 @@ def generate_launch_description():
             executable='newposition',
             name='odrive_angle_can_node',
             output='screen',
-            parameters=[{'can_interface': can_iface}],
+            parameters=[{
+                'can_interface': can_iface,
+                'joint1_offset_turns': j1_off,
+                'joint2_offset_turns': j2_off,
+            }],
         ),
         Node(
             package='SCARA_pkg',

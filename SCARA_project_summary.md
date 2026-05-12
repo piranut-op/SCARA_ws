@@ -171,7 +171,7 @@ Planning parameters: 5 attempts, 5 s budget per plan, velocity/accel scaling 0.4
 ### When to use it
 - First bring-up of a freshly built workspace, before plugging in the RealSense.
 - Reproducing controller / trajectory-execution problems with no perception variables.
-- Validating new ros2_control or MoveIt YAML changes (§ MoveIt → ros2_control wiring in CLAUDE.md).
+- Validating new ros2_control or MoveIt YAML changes.
 
 The chosen joint values are pure waypoints — they have no physical pick location. If you want it to engage at a specific table position, change `pick_j*` / `place_j*` directly (or use the camera variant, which solves IK at runtime).
 
