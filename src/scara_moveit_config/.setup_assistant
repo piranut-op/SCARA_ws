@@ -5,8 +5,8 @@ moveit_setup_assistant_config:
   srdf:
     relative_path: config/scara_robot.srdf
   package_settings:
-    author_name: ranut
-    author_email: ranutphlang@gmail.com
+    author_name: piranut-op
+    author_email: piranutphlong@gmail.com
     generated_timestamp: 1774424332
   control_xacro:
     command:
