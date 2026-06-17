@@ -6,7 +6,7 @@ This document summarises the entire `~/scara_bot_ws` ROS 2 workspace: the robot,
 
 ## 1. Robot
 
-4-DOF SCARA built around two ODrive-driven revolute joints and one MKS-driven prismatic end-effector.
+3-DOF SCARA built around two ODrive-driven revolute joints and one MKS-driven prismatic end-effector.
 
 ### Mechanical chain
 - `Link_1_joint` (revolute, Z-) — shoulder; ODrive motor 1.

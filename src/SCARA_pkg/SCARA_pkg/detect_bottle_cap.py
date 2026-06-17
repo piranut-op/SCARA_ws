@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import os
+
 import cv2
 import numpy as np
 import pyrealsense2 as rs
@@ -33,8 +35,10 @@ STABILITY_DURATION_S = 5.0
 ZOOM_FACTOR = 2.0
 
 # ── Model path ─────────────────────────────────────────────────────────────────
-# Edit this to point at your bottle_cap best.pt
-MODEL_PATH = "/home/piranut/scara_bot_ws/src/best_v2.pt"
+# Defaults to the canonical workspace layout (~/scara_bot_ws/src/best_v2.pt).
+# Override per-run with:
+#   ros2 run SCARA_pkg detect_bottle_cap --ros-args -p model_path:=/abs/path/best_v2.pt
+DEFAULT_MODEL_PATH = "~/scara_bot_ws/src/best_v2.pt"
 
 
 class BottleCapDetectorNode(Node):
@@ -51,14 +55,19 @@ class BottleCapDetectorNode(Node):
         self.declare_parameter("show_preview", True)
         self._show_preview = self.get_parameter("show_preview").get_parameter_value().bool_value
 
+        self.declare_parameter("model_path", DEFAULT_MODEL_PATH)
+        model_path = os.path.expanduser(
+            self.get_parameter("model_path").get_parameter_value().string_value
+        )
+
         # ── Publishers
         self._det_pub = self.create_publisher(PointStamped, TOPIC_DETECTIONS, 10)
         self._img_pub = self.create_publisher(Image, TOPIC_IMAGE, 10)
         self._bridge  = CvBridge()
 
         # ── YOLO model
-        self.model = YOLO(MODEL_PATH)
-        self.get_logger().info(f"YOLO loaded from {MODEL_PATH}  |  task: {self.model.task}")
+        self.model = YOLO(model_path)
+        self.get_logger().info(f"YOLO loaded from {model_path}  |  task: {self.model.task}")
 
         # ── RealSense pipeline
         self._pipeline = rs.pipeline()

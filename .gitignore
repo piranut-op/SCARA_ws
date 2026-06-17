@@ -6,6 +6,9 @@ log/
 # stale archive
 src/scara_robot.zip
 
+# SW2URDF exporter log (leaks local file paths)
+*.log
+
 # python
 __pycache__/
 *.py[cod]
