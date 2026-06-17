@@ -3,9 +3,9 @@
 <package format="3">
   <name>SCARA_pkg</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
-  <maintainer email="reach@todo.todo">reach</maintainer>
-  <license>TODO: License declaration</license>
+  <description>Hardware bridge (ODrive and MKS over SocketCAN) plus Python IK/FK, joint-state, and RealSense+YOLO bottle-cap detection nodes for the SCARA robot.</description>
+  <maintainer email="piranutphlong@gmail.com">piranut-op</maintainer>
+  <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>

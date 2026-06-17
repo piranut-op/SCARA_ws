@@ -18,10 +18,10 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='reach',
-    maintainer_email='reach@todo.todo',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    maintainer='piranut-op',
+    maintainer_email='piranutphlong@gmail.com',
+    description='Hardware bridge (ODrive and MKS over SocketCAN) plus Python IK/FK, joint-state, and RealSense+YOLO bottle-cap detection nodes for the SCARA robot.',
+    license='Apache-2.0',
     extras_require={
         'test': [
             'pytest',
